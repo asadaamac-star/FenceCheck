@@ -3,19 +3,35 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
-    <title>電気柵点検アプリ（プロ仕様）</title>
+    <title>電気柵点検アプリ（記録制御版）</title>
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
     <style>
-        body { margin: 0; padding: 0; font-family: sans-serif; }
-        #map { height: 50vh; width: 100%; }
-        .controls { padding: 15px; background: #f8f9fa; height: 50vh; box-sizing: border-box; overflow-y: auto; }
-        .input-group { margin-bottom: 10px; }
-        label { display: block; font-weight: bold; margin-bottom: 5px; font-size: 14px; }
-        input, textarea { width: 100%; padding: 12px; border: 1px solid #ccc; border-radius: 4px; box-sizing: border-box; font-size: 16px; }
-        button { width: 100%; padding: 15px; background-color: #28a745; color: white; border: none; border-radius: 4px; font-size: 18px; font-weight: bold; cursor: pointer; margin-top: 10px; }
-        button:disabled { background-color: #ccc; }
-        #status { font-size: 12px; color: #333; margin-top: 10px; text-align: center; line-height: 1.4; }
-        .stats-box { background: #e9ecef; padding: 5px; border-radius: 4px; margin-top: 5px; display: flex; justify-content: space-around; }
+        body { margin: 0; padding: 0; font-family: sans-serif; background: #f0f2f5; }
+        #map { height: 45vh; width: 100%; }
+        .controls { padding: 15px; height: 55vh; box-sizing: border-box; overflow-y: auto; }
+        .input-group { margin-bottom: 12px; }
+        label { display: block; font-weight: bold; margin-bottom: 5px; font-size: 14px; color: #444; }
+        input, textarea { width: 100%; padding: 12px; border: 1px solid #ccc; border-radius: 6px; box-sizing: border-box; font-size: 16px; }
+        
+        /* ボタン類のスタイル */
+        .btn-flex { display: flex; gap: 10px; margin-bottom: 10px; }
+        button { flex: 1; padding: 15px; border: none; border-radius: 6px; font-size: 16px; font-weight: bold; cursor: pointer; color: white; transition: 0.3s; }
+        
+        #recordBtn { background-color: #007bff; } /* 青: 開始前 */
+        #recordBtn.recording { background-color: #dc3545; animation: pulse 2s infinite; } /* 赤: 記録中 */
+        
+        #sendBtn { background-color: #28a745; }
+        button:disabled { background-color: #ccc !important; cursor: not-allowed; }
+
+        @keyframes pulse {
+            0% { opacity: 1; }
+            50% { opacity: 0.7; }
+            100% { opacity: 1; }
+        }
+
+        #status { font-size: 13px; color: #333; margin-top: 10px; text-align: center; }
+        .stats-box { background: #fff; padding: 8px; border-radius: 6px; margin-top: 5px; display: flex; justify-content: space-around; border: 1px solid #ddd; }
+        .highlight { color: #dc3545; font-weight: bold; }
     </style>
 </head>
 <body>
@@ -23,6 +39,10 @@
 <div id="map"></div>
 
 <div class="controls">
+    <div class="btn-flex">
+        <button id="recordBtn">ルート記録開始</button>
+    </div>
+
     <div class="input-group">
         <label>電圧 (V)</label>
         <input type="number" id="voltage" placeholder="例: 8000" inputmode="numeric">
@@ -31,12 +51,14 @@
         <label>メモ</label>
         <textarea id="memo" rows="2" placeholder="異常なし、草刈り必要など"></textarea>
     </div>
-    <button id="sendBtn">点検データを送信</button>
+    
+    <button id="sendBtn">データを送信してリセット</button>
+    
     <div id="status">
-        位置情報を取得中...
+        <div id="gps-status">位置情報を取得中...</div>
         <div class="stats-box">
-            <span>記録数: <span id="count">0</span>点</span>
-            <span>移動距離: <span id="dist">0</span>m</span>
+            <span>記録数: <span id="count" class="highlight">0</span>点</span>
+            <span>距離: <span id="dist" class="highlight">0</span>m</span>
         </div>
     </div>
 </div>
@@ -46,18 +68,18 @@
 <script>
     const GAS_URL = "https://script.google.com/macros/s/AKfycbwxOufY73Gwh7cx6mrtR4iDwE1K7pOxw7CTh8i68OWlB0WYHnm7WqlJJCX6TJFmLoIh4w/exec";
     
-    // 設定
-    const MIN_DISTANCE = 1.0; // 記録する最小距離 (メートル)
-    const PRECISION = 6;     // 小数点以下の桁数
+    const MIN_DISTANCE = 1.0; 
+    const PRECISION = 6;     
     
     let map, marker, pathLine;
     let currentPos = { lat: 0, lng: 0 };
     let pathHistory = []; 
     let totalDistance = 0;
+    let isRecording = false; // 記録フラグ
 
-    // 2点間の距離を計算する関数 (Haversine formula)
+    // 距離計算用
     function getDistance(lat1, lon1, lat2, lon2) {
-        const R = 6371000; // 地球の半径 (m)
+        const R = 6371000;
         const dLat = (lat2 - lat1) * Math.PI / 180;
         const dLon = (lon2 - lon1) * Math.PI / 180;
         const a = Math.sin(dLat / 2) * Math.sin(dLat / 2) +
@@ -67,53 +89,65 @@
         return R * c;
     }
 
+    // 地図初期化
     map = L.map('map').setView([35.6812, 139.7671], 15);
-    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-        attribution: '© OpenStreetMap'
-    }).addTo(map);
+    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { attribution: '© OpenStreetMap' }).addTo(map);
+    pathLine = L.polyline([], {color: '#dc3545', weight: 6, opacity: 0.8}).addTo(map);
 
-    pathLine = L.polyline([], {color: '#007bff', weight: 6, opacity: 0.7}).addTo(map);
-
+    // GPS監視
     if (navigator.geolocation) {
         navigator.geolocation.watchPosition(
             (pos) => {
                 const lat = parseFloat(pos.coords.latitude.toFixed(PRECISION));
                 const lng = parseFloat(pos.coords.longitude.toFixed(PRECISION));
                 const accuracy = Math.round(pos.coords.accuracy);
-
                 currentPos = { lat, lng };
                 
                 if (!marker) {
-                    marker = L.circleMarker([lat, lng], {radius: 8, color: 'red', fillColor: 'red', fillOpacity: 1}).addTo(map);
+                    marker = L.circleMarker([lat, lng], {radius: 8, color: '#007bff', fillColor: '#007bff', fillOpacity: 1}).addTo(map);
                     map.panTo([lat, lng]);
                 } else {
                     marker.setLatLng([lat, lng]);
                 }
-                
-                // 記録判定: 最初の地点か、前回から1m以上移動している場合のみ追加
-                if (pathHistory.length === 0) {
-                    pathHistory.push([lat, lng]);
-                } else {
-                    const lastPoint = pathHistory[pathHistory.length - 1];
-                    const d = getDistance(lastPoint[0], lastPoint[1], lat, lng);
-                    if (d >= MIN_DISTANCE) {
-                        totalDistance += d;
+
+                // --- 記録中のみ実行される処理 ---
+                if (isRecording) {
+                    if (pathHistory.length === 0) {
                         pathHistory.push([lat, lng]);
-                        pathLine.setLatLngs(pathHistory);
+                    } else {
+                        const lastPoint = pathHistory[pathHistory.length - 1];
+                        const d = getDistance(lastPoint[0], lastPoint[1], lat, lng);
+                        if (d >= MIN_DISTANCE) {
+                            totalDistance += d;
+                            pathHistory.push([lat, lng]);
+                            pathLine.setLatLngs(pathHistory);
+                        }
                     }
                 }
                 
-                // 画面表示の更新
+                document.getElementById('gps-status').innerText = `精度: ±${accuracy}m / 現在: ${lat}, ${lng}`;
                 document.getElementById('count').innerText = pathHistory.length;
                 document.getElementById('dist').innerText = Math.round(totalDistance);
             },
-            (err) => {
-                console.error(err);
-            },
+            (err) => { console.error(err); },
             { enableHighAccuracy: true, timeout: 10000, maximumAge: 0 }
         );
     }
 
+    // 記録ボタンのクリック処理
+    const recordBtn = document.getElementById('recordBtn');
+    recordBtn.addEventListener('click', () => {
+        isRecording = !isRecording;
+        if (isRecording) {
+            recordBtn.innerText = "記録を停止";
+            recordBtn.classList.add('recording');
+        } else {
+            recordBtn.innerText = "ルート記録を再開";
+            recordBtn.classList.remove('recording');
+        }
+    });
+
+    // 送信ボタンのクリック処理
     document.getElementById('sendBtn').addEventListener('click', async () => {
         const voltage = document.getElementById('voltage').value;
         const memo = document.getElementById('memo').value;
@@ -126,7 +160,6 @@
 
         btn.disabled = true;
 
-        // WKT形式の生成 (この時点で座標はすでに丸められています)
         const wktPath = pathHistory.length > 1 
             ? "LINESTRING(" + pathHistory.map(p => `${p[1]} ${p[0]}`).join(", ") + ")" 
             : "";
@@ -147,15 +180,61 @@
                 body: JSON.stringify(data)
             });
 
-            alert("データを送信しました！\n記録地点数: " + pathHistory.length + "点");
+            alert("データを保存しました！\nルートはリセットされます。");
+
+            // --- 送信後のリセット処理 ---
             document.getElementById('voltage').value = "";
             document.getElementById('memo').value = "";
+            pathHistory = [];
+            pathLine.setLatLngs([]);
+            totalDistance = 0;
+            document.getElementById('count').innerText = "0";
+            document.getElementById('dist').innerText = "0";
+            
+            // 記録状態も一旦解除する場合（必要に応じて変更可）
+            isRecording = false;
+            recordBtn.innerText = "ルート記録開始";
+            recordBtn.classList.remove('recording');
+
         } catch (e) {
             alert("エラーが発生しました: " + e.message);
         } finally {
             btn.disabled = false;
         }
     });
+
+    // --- 追加する関数：過去のデータを取得して地図に表示する ---
+    async function loadPastMarkers() {
+        try {
+            const response = await fetch(GAS_URL); // GASのdoGetを叩く
+            const data = await response.json();
+            
+            data.forEach(item => {
+                if (item.lat && item.lng) {
+                    // 過去の地点はオレンジ色の小さい円で表示
+                    L.circleMarker([item.lat, item.lng], {
+                        radius: 6,
+                        color: '#ff9800', // オレンジ
+                        fillColor: '#ff9800',
+                        fillOpacity: 0.8
+                    })
+                    .addTo(map)
+                    .bindPopup(`
+                        <b>過去の点検</b><br>
+                        日付: ${new Date(item.date).toLocaleDateString()}<br>
+                        電圧: ${item.voltage}V<br>
+                        メモ: ${item.memo || 'なし'}
+                    `);
+                }
+            });
+        } catch (e) {
+            console.error("過去データの読み込み失敗:", e);
+        }
+    }
+    
+    // --- 地図初期化（既存のコード内）の後に実行 ---
+    // map = L.map('map')... の下あたりに追加
+    loadPastMarkers();
 </script>
 
 </body>
