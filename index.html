@@ -89,6 +89,9 @@
         const memo = document.getElementById('memo').value;
         const btn = document.getElementById('sendBtn');
         const status = document.getElementById('status');
+        
+        // pathHistory（配列）を、WKT形式の文字列に変換する
+        const wktPath = "LINESTRING(" + pathHistory.map(p => `${p[1]} ${p[0]}`).join(", ") + ")";
 
         if (!voltage) {
             alert("電圧を入力してください");
@@ -102,7 +105,8 @@
             lat: currentPos.lat,
             lng: currentPos.lng,
             voltage: voltage,
-            memo: memo
+            memo: memo,
+            path: wktPath
         };
 
         try {
@@ -129,3 +133,4 @@
 </body>
 
 </html>
+
