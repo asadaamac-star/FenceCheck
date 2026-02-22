@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
-    <title>電気柵点検アプリ（ルート保存版）</title>
+    <title>電気柵点検アプリ（プロ仕様）</title>
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
     <style>
         body { margin: 0; padding: 0; font-family: sans-serif; }
@@ -14,7 +14,8 @@
         input, textarea { width: 100%; padding: 12px; border: 1px solid #ccc; border-radius: 4px; box-sizing: border-box; font-size: 16px; }
         button { width: 100%; padding: 15px; background-color: #28a745; color: white; border: none; border-radius: 4px; font-size: 18px; font-weight: bold; cursor: pointer; margin-top: 10px; }
         button:disabled { background-color: #ccc; }
-        #status { font-size: 12px; color: #666; margin-top: 10px; text-align: center; }
+        #status { font-size: 12px; color: #333; margin-top: 10px; text-align: center; line-height: 1.4; }
+        .stats-box { background: #e9ecef; padding: 5px; border-radius: 4px; margin-top: 5px; display: flex; justify-content: space-around; }
     </style>
 </head>
 <body>
@@ -31,7 +32,13 @@
         <textarea id="memo" rows="2" placeholder="異常なし、草刈り必要など"></textarea>
     </div>
     <button id="sendBtn">点検データを送信</button>
-    <div id="status">位置情報を取得中...</div>
+    <div id="status">
+        位置情報を取得中...
+        <div class="stats-box">
+            <span>記録数: <span id="count">0</span>点</span>
+            <span>移動距離: <span id="dist">0</span>m</span>
+        </div>
+    </div>
 </div>
 
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
@@ -39,9 +46,26 @@
 <script>
     const GAS_URL = "https://script.google.com/macros/s/AKfycbwxOufY73Gwh7cx6mrtR4iDwE1K7pOxw7CTh8i68OWlB0WYHnm7WqlJJCX6TJFmLoIh4w/exec";
     
+    // 設定
+    const MIN_DISTANCE = 1.0; // 記録する最小距離 (メートル)
+    const PRECISION = 6;     // 小数点以下の桁数
+    
     let map, marker, pathLine;
     let currentPos = { lat: 0, lng: 0 };
     let pathHistory = []; 
+    let totalDistance = 0;
+
+    // 2点間の距離を計算する関数 (Haversine formula)
+    function getDistance(lat1, lon1, lat2, lon2) {
+        const R = 6371000; // 地球の半径 (m)
+        const dLat = (lat2 - lat1) * Math.PI / 180;
+        const dLon = (lon2 - lon1) * Math.PI / 180;
+        const a = Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+                  Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) *
+                  Math.sin(dLon / 2) * Math.sin(dLon / 2);
+        const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+        return R * c;
+    }
 
     map = L.map('map').setView([35.6812, 139.7671], 15);
     L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
@@ -53,23 +77,38 @@
     if (navigator.geolocation) {
         navigator.geolocation.watchPosition(
             (pos) => {
-                const { latitude, longitude, accuracy } = pos.coords;
-                currentPos = { lat: latitude, lng: longitude };
+                const lat = parseFloat(pos.coords.latitude.toFixed(PRECISION));
+                const lng = parseFloat(pos.coords.longitude.toFixed(PRECISION));
+                const accuracy = Math.round(pos.coords.accuracy);
+
+                currentPos = { lat, lng };
                 
                 if (!marker) {
-                    marker = L.circleMarker([latitude, longitude], {radius: 8, color: 'red', fillColor: 'red', fillOpacity: 1}).addTo(map);
-                    map.panTo([latitude, longitude]);
+                    marker = L.circleMarker([lat, lng], {radius: 8, color: 'red', fillColor: 'red', fillOpacity: 1}).addTo(map);
+                    map.panTo([lat, lng]);
                 } else {
-                    marker.setLatLng([latitude, longitude]);
+                    marker.setLatLng([lat, lng]);
                 }
                 
-                pathHistory.push([latitude, longitude]);
-                pathLine.setLatLngs(pathHistory);
+                // 記録判定: 最初の地点か、前回から1m以上移動している場合のみ追加
+                if (pathHistory.length === 0) {
+                    pathHistory.push([lat, lng]);
+                } else {
+                    const lastPoint = pathHistory[pathHistory.length - 1];
+                    const d = getDistance(lastPoint[0], lastPoint[1], lat, lng);
+                    if (d >= MIN_DISTANCE) {
+                        totalDistance += d;
+                        pathHistory.push([lat, lng]);
+                        pathLine.setLatLngs(pathHistory);
+                    }
+                }
                 
-                document.getElementById('status').innerText = `精度: ±${Math.round(accuracy)}m / 記録点数: ${pathHistory.length}`;
+                // 画面表示の更新
+                document.getElementById('count').innerText = pathHistory.length;
+                document.getElementById('dist').innerText = Math.round(totalDistance);
             },
             (err) => {
-                document.getElementById('status').innerText = "GPSエラー: " + err.message;
+                console.error(err);
             },
             { enableHighAccuracy: true, timeout: 10000, maximumAge: 0 }
         );
@@ -79,7 +118,6 @@
         const voltage = document.getElementById('voltage').value;
         const memo = document.getElementById('memo').value;
         const btn = document.getElementById('sendBtn');
-        const status = document.getElementById('status');
 
         if (!voltage) {
             alert("電圧を入力してください");
@@ -87,10 +125,8 @@
         }
 
         btn.disabled = true;
-        status.innerText = "送信中...";
 
-        // WKT形式 (LINESTRING(lng lat, lng lat, ...)) に変換
-        // GISソフト(QGIS等)でそのまま認識できる形式です
+        // WKT形式の生成 (この時点で座標はすでに丸められています)
         const wktPath = pathHistory.length > 1 
             ? "LINESTRING(" + pathHistory.map(p => `${p[1]} ${p[0]}`).join(", ") + ")" 
             : "";
@@ -110,27 +146,17 @@
                 headers: { "Content-Type": "application/json" },
                 body: JSON.stringify(data)
             });
-            // alert("保存しました！"); の前に、これを追加してみてください
-            //console.log("送信データ:", data); 
-            //alert("送信データを確認: " + data.path); // 送信直前に中身を表示させる
-            
-            alert("保存しました！ルートも記録されました。");
+
+            alert("データを送信しました！\n記録地点数: " + pathHistory.length + "点");
             document.getElementById('voltage').value = "";
             document.getElementById('memo').value = "";
-            // 送信後にルートをリセットしたい場合は以下を有効化
-            pathHistory = [];
-            pathLine.setLatLngs([]);
         } catch (e) {
             alert("エラーが発生しました: " + e.message);
         } finally {
             btn.disabled = false;
-            status.innerText = "位置取得中...";
         }
     });
 </script>
 
 </body>
 </html>
-
-
-
