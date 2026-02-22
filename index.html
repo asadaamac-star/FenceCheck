@@ -3,35 +3,31 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
-    <title>電気柵点検アプリ（記録制御版）</title>
+    <title>電気柵点検ナビ Pro</title>
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
     <style>
-        body { margin: 0; padding: 0; font-family: sans-serif; background: #f0f2f5; }
-        #map { height: 45vh; width: 100%; }
+        body { margin: 0; padding: 0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; background: #f4f7f9; }
+        #map { height: 45vh; width: 100%; border-bottom: 2px solid #ccc; }
         .controls { padding: 15px; height: 55vh; box-sizing: border-box; overflow-y: auto; }
+        
+        .btn-flex { display: flex; gap: 10px; margin-bottom: 12px; }
+        button { flex: 1; padding: 14px; border: none; border-radius: 8px; font-size: 16px; font-weight: bold; cursor: pointer; color: white; transition: 0.2s; box-shadow: 0 2px 4px rgba(0,0,0,0.1); }
+        
+        #recordBtn { background-color: #007bff; }
+        #recordBtn.recording { background-color: #dc3545; animation: pulse 2s infinite; }
+        #sendBtn { background-color: #28a745; width: 100%; margin-top: 10px; }
+        button:active { transform: translateY(1px); box-shadow: none; }
+        button:disabled { background-color: #ccc !important; }
+
+        @keyframes pulse { 0% { opacity: 1; } 50% { opacity: 0.7; } 100% { opacity: 1; } }
+
         .input-group { margin-bottom: 12px; }
-        label { display: block; font-weight: bold; margin-bottom: 5px; font-size: 14px; color: #444; }
-        input, textarea { width: 100%; padding: 12px; border: 1px solid #ccc; border-radius: 6px; box-sizing: border-box; font-size: 16px; }
+        label { display: block; font-weight: bold; margin-bottom: 5px; font-size: 13px; color: #555; }
+        input, textarea { width: 100%; padding: 12px; border: 1px solid #ddd; border-radius: 6px; box-sizing: border-box; font-size: 16px; background: white; }
         
-        /* ボタン類のスタイル */
-        .btn-flex { display: flex; gap: 10px; margin-bottom: 10px; }
-        button { flex: 1; padding: 15px; border: none; border-radius: 6px; font-size: 16px; font-weight: bold; cursor: pointer; color: white; transition: 0.3s; }
-        
-        #recordBtn { background-color: #007bff; } /* 青: 開始前 */
-        #recordBtn.recording { background-color: #dc3545; animation: pulse 2s infinite; } /* 赤: 記録中 */
-        
-        #sendBtn { background-color: #28a745; }
-        button:disabled { background-color: #ccc !important; cursor: not-allowed; }
-
-        @keyframes pulse {
-            0% { opacity: 1; }
-            50% { opacity: 0.7; }
-            100% { opacity: 1; }
-        }
-
-        #status { font-size: 13px; color: #333; margin-top: 10px; text-align: center; }
-        .stats-box { background: #fff; padding: 8px; border-radius: 6px; margin-top: 5px; display: flex; justify-content: space-around; border: 1px solid #ddd; }
-        .highlight { color: #dc3545; font-weight: bold; }
+        .stats-box { background: white; padding: 10px; border-radius: 8px; margin-top: 8px; display: flex; justify-content: space-around; border: 1px solid #eee; font-size: 14px; }
+        .val { color: #dc3545; font-weight: bold; font-size: 16px; }
+        #gps-status { font-size: 11px; color: #888; text-align: center; margin-top: 8px; }
     </style>
 </head>
 <body>
@@ -40,234 +36,166 @@
 
 <div class="controls">
     <div class="btn-flex">
-        <button id="recordBtn">ルート記録開始</button>
+        <button id="recordBtn">👣 ルート記録開始</button>
     </div>
 
     <div class="input-group">
-        <label>電圧 (V)</label>
-        <input type="number" id="voltage" placeholder="例: 8000" inputmode="numeric">
+        <label>⚡ 電圧 (V)</label>
+        <input type="number" id="voltage" placeholder="例: 8500" inputmode="numeric">
     </div>
+    
     <div class="input-group">
-        <label>メモ</label>
-        <textarea id="memo" rows="2" placeholder="異常なし、草刈り必要など"></textarea>
+        <label>📝 点検メモ</label>
+        <textarea id="memo" rows="2" placeholder="草刈り済、碍子交換など"></textarea>
     </div>
     
-    <button id="sendBtn">データを送信してリセット</button>
+    <button id="sendBtn">✅ データを送信してリセット</button>
     
-    <div id="status">
-        <div id="gps-status">位置情報を取得中...</div>
-        <div class="stats-box">
-            <span>記録数: <span id="count" class="highlight">0</span>点</span>
-            <span>距離: <span id="dist" class="highlight">0</span>m</span>
-        </div>
+    <div class="stats-box">
+        <div>記録: <span id="count" class="val">0</span> 点</div>
+        <div>距離: <span id="dist" class="val">0</span> m</div>
     </div>
+    <div id="gps-status">位置情報を取得中...</div>
 </div>
 
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 
 <script>
+    // 【設定】GASのURLを自分のものに書き換えてください
     const GAS_URL = "https://script.google.com/macros/s/AKfycbwxOufY73Gwh7cx6mrtR4iDwE1K7pOxw7CTh8i68OWlB0WYHnm7WqlJJCX6TJFmLoIh4w/exec";
     
-    const MIN_DISTANCE = 1.0; 
-    const PRECISION = 6;     
+    const MIN_DISTANCE = 1.0; // 1メートル動いたら記録
+    const PRECISION = 6;      // 小数点以下6桁
     
     let map, marker, pathLine;
     let currentPos = { lat: 0, lng: 0 };
     let pathHistory = []; 
     let totalDistance = 0;
-    let isRecording = false; // 記録フラグ
+    let isRecording = false;
 
-    // 距離計算用
+    // --- 1. 地図の初期化 (国土地理院) ---
+    const stdMap = L.tileLayer('https://cyberjapandata.gsi.go.jp/xyz/std/{z}/{x}/{y}.png', {
+        attribution: "<a href='https://maps.gsi.go.jp/development/ichiran.html'>地理院タイル</a>"
+    });
+    const ortMap = L.tileLayer('https://cyberjapandata.gsi.go.jp/xyz/ort/{z}/{x}/{y}.jpg', {
+        attribution: "<a href='https://maps.gsi.go.jp/development/ichiran.html'>地理院タイル(写真)</a>"
+    });
+
+    map = L.map('map', { center: [35.6812, 139.7671], zoom: 16, layers: [stdMap] });
+    L.control.layers({"地理院地図": stdMap, "航空写真": ortMap}).addTo(map);
+
+    pathLine = L.polyline([], {color: '#dc3545', weight: 5, opacity: 0.8}).addTo(map);
+
+    // --- 2. データの読み込み処理 ---
+    
+    // 田畑の境界線(GeoJSON)を読み込む
+    async function loadFields() {
+        try {
+            const res = await fetch('fields.geojson');
+            if (!res.ok) return;
+            const geojsonData = await res.json();
+            L.geoJSON(geojsonData, {
+                style: { color: "#28a745", weight: 2, fillOpacity: 0.1 }
+            }).addTo(map);
+        } catch (e) { console.log("GeoJSONなし"); }
+    }
+
+    // 過去の点検地点を読み込む
+    async function loadPastMarkers() {
+        try {
+            const res = await fetch(GAS_URL);
+            const data = await res.json();
+            data.forEach(item => {
+                L.circleMarker([item.lat, item.lng], { radius: 5, color: '#ff9800', fillOpacity: 0.8 }).addTo(map)
+                 .bindPopup(`過去の点検: ${item.voltage}V (${new Date(item.date).toLocaleDateString()})`);
+            });
+        } catch (e) { console.log("過去データ読み込み失敗"); }
+    }
+
+    loadFields();
+    loadPastMarkers();
+
+    // --- 3. GPS・記録ロジック ---
+
     function getDistance(lat1, lon1, lat2, lon2) {
         const R = 6371000;
         const dLat = (lat2 - lat1) * Math.PI / 180;
         const dLon = (lon2 - lon1) * Math.PI / 180;
-        const a = Math.sin(dLat / 2) * Math.sin(dLat / 2) +
-                  Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) *
-                  Math.sin(dLon / 2) * Math.sin(dLon / 2);
-        const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
-        return R * c;
+        const a = Math.sin(dLat / 2) ** 2 + Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) * Math.sin(dLon / 2) ** 2;
+        return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
     }
 
-    // 地図初期化
-    map = L.map('map').setView([35.6812, 139.7671], 15);
-    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { attribution: '© OpenStreetMap' }).addTo(map);
-    pathLine = L.polyline([], {color: '#dc3545', weight: 6, opacity: 0.8}).addTo(map);
-
-    // GPS監視
     if (navigator.geolocation) {
-        navigator.geolocation.watchPosition(
-            (pos) => {
-                const lat = parseFloat(pos.coords.latitude.toFixed(PRECISION));
-                const lng = parseFloat(pos.coords.longitude.toFixed(PRECISION));
-                const accuracy = Math.round(pos.coords.accuracy);
-                currentPos = { lat, lng };
-                
-                if (!marker) {
-                    marker = L.circleMarker([lat, lng], {radius: 8, color: '#007bff', fillColor: '#007bff', fillOpacity: 1}).addTo(map);
-                    map.panTo([lat, lng]);
-                } else {
-                    marker.setLatLng([lat, lng]);
-                }
+        navigator.geolocation.watchPosition((pos) => {
+            const lat = parseFloat(pos.coords.latitude.toFixed(PRECISION));
+            const lng = parseFloat(pos.coords.longitude.toFixed(PRECISION));
+            currentPos = { lat, lng };
 
-                // --- 記録中のみ実行される処理 ---
-                if (isRecording) {
-                    if (pathHistory.length === 0) {
+            if (!marker) {
+                marker = L.circleMarker([lat, lng], {radius: 8, color: '#007bff', fillColor: '#007bff', fillOpacity: 1}).addTo(map);
+                map.panTo([lat, lng]);
+            } else {
+                marker.setLatLng([lat, lng]);
+            }
+
+            if (isRecording) {
+                if (pathHistory.length === 0) {
+                    pathHistory.push([lat, lng]);
+                } else {
+                    const last = pathHistory[pathHistory.length - 1];
+                    const d = getDistance(last[0], last[1], lat, lng);
+                    if (d >= MIN_DISTANCE) {
+                        totalDistance += d;
                         pathHistory.push([lat, lng]);
-                    } else {
-                        const lastPoint = pathHistory[pathHistory.length - 1];
-                        const d = getDistance(lastPoint[0], lastPoint[1], lat, lng);
-                        if (d >= MIN_DISTANCE) {
-                            totalDistance += d;
-                            pathHistory.push([lat, lng]);
-                            pathLine.setLatLngs(pathHistory);
-                        }
+                        pathLine.setLatLngs(pathHistory);
                     }
                 }
-                
-                document.getElementById('gps-status').innerText = `精度: ±${accuracy}m / 現在: ${lat}, ${lng}`;
-                document.getElementById('count').innerText = pathHistory.length;
-                document.getElementById('dist').innerText = Math.round(totalDistance);
-            },
-            (err) => { console.error(err); },
-            { enableHighAccuracy: true, timeout: 10000, maximumAge: 0 }
-        );
+            }
+            document.getElementById('gps-status').innerText = `精度: ±${Math.round(pos.coords.accuracy)}m / 現在: ${lat}, ${lng}`;
+            document.getElementById('count').innerText = pathHistory.length;
+            document.getElementById('dist').innerText = Math.round(totalDistance);
+        }, null, { enableHighAccuracy: true });
     }
 
-    // 記録ボタンのクリック処理
+    // --- 4. ボタン操作 ---
+
     const recordBtn = document.getElementById('recordBtn');
     recordBtn.addEventListener('click', () => {
         isRecording = !isRecording;
-        if (isRecording) {
-            recordBtn.innerText = "記録を停止";
-            recordBtn.classList.add('recording');
-        } else {
-            recordBtn.innerText = "ルート記録を再開";
-            recordBtn.classList.remove('recording');
-        }
+        recordBtn.innerText = isRecording ? "⏹ 記録を停止" : "👣 ルート記録を再開";
+        recordBtn.classList.toggle('recording', isRecording);
     });
 
-    // 送信ボタンのクリック処理
     document.getElementById('sendBtn').addEventListener('click', async () => {
         const voltage = document.getElementById('voltage').value;
         const memo = document.getElementById('memo').value;
+        if (!voltage) return alert("電圧を入力してください");
+
         const btn = document.getElementById('sendBtn');
-
-        if (!voltage) {
-            alert("電圧を入力してください");
-            return;
-        }
-
         btn.disabled = true;
+        btn.innerText = "送信中...";
 
-        const wktPath = pathHistory.length > 1 
-            ? "LINESTRING(" + pathHistory.map(p => `${p[1]} ${p[0]}`).join(", ") + ")" 
-            : "";
-
-        const data = {
-            lat: currentPos.lat,
-            lng: currentPos.lng,
-            voltage: voltage,
-            memo: memo,
-            path: wktPath
-        };
+        const wkt = pathHistory.length > 1 ? `LINESTRING(${pathHistory.map(p => `${p[1]} ${p[0]}`).join(", ")})` : "";
 
         try {
-            await fetch(GAS_URL, {
-                method: "POST",
-                mode: "no-cors",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify(data)
-            });
-
-            alert("データを保存しました！\nルートはリセットされます。");
-
-            // --- 送信後のリセット処理 ---
+            await fetch(GAS_URL, { method: "POST", mode: "no-cors", body: JSON.stringify({ lat: currentPos.lat, lng: currentPos.lng, voltage, memo, path: wkt }) });
+            alert("送信成功！ルートをリセットしました。");
+            // リセット処理
             document.getElementById('voltage').value = "";
             document.getElementById('memo').value = "";
             pathHistory = [];
             pathLine.setLatLngs([]);
             totalDistance = 0;
+            isRecording = false;
+            recordBtn.innerText = "👣 ルート記録開始";
+            recordBtn.classList.remove('recording');
             document.getElementById('count').innerText = "0";
             document.getElementById('dist').innerText = "0";
-            
-            // 記録状態も一旦解除する場合（必要に応じて変更可）
-            isRecording = false;
-            recordBtn.innerText = "ルート記録開始";
-            recordBtn.classList.remove('recording');
-
-        } catch (e) {
-            alert("エラーが発生しました: " + e.message);
-        } finally {
-            btn.disabled = false;
-        }
+            loadPastMarkers(); // 最新の点を再読み込み
+        } catch (e) { alert("送信エラー"); }
+        btn.disabled = false;
+        btn.innerText = "✅ データを送信してリセット";
     });
-
-    // --- 追加する関数：過去のデータを取得して地図に表示する ---
-    async function loadPastMarkers() {
-        try {
-            const response = await fetch(GAS_URL); // GASのdoGetを叩く
-            const data = await response.json();
-            
-            data.forEach(item => {
-                if (item.lat && item.lng) {
-                    // 過去の地点はオレンジ色の小さい円で表示
-                    L.circleMarker([item.lat, item.lng], {
-                        radius: 6,
-                        color: '#ff9800', // オレンジ
-                        fillColor: '#ff9800',
-                        fillOpacity: 0.8
-                    })
-                    .addTo(map)
-                    .bindPopup(`
-                        <b>過去の点検</b><br>
-                        日付: ${new Date(item.date).toLocaleDateString()}<br>
-                        電圧: ${item.voltage}V<br>
-                        メモ: ${item.memo || 'なし'}
-                    `);
-                }
-            });
-        } catch (e) {
-            console.error("過去データの読み込み失敗:", e);
-        }
-    }
-    
-    // --- 田畑のデータを読み込んで表示する関数 ---
-    async function loadFields() {
-        try {
-            const response = await fetch('fields.geojson'); // アップロードしたファイル名
-            const geojsonData = await response.json();
-    
-            L.geoJSON(geojsonData, {
-                style: function(feature) {
-                    return {
-                        color: "#28a745", // 枠線の色（緑）
-                        weight: 2,        // 線の太さ
-                        fillColor: "#28a745", // 塗りつぶしの色
-                        fillOpacity: 0.2  // 透明度（薄くする）
-                    };
-                },
-                onEachFeature: function(feature, layer) {
-                    // もし属性データ（田畑名など）があればポップアップで表示
-                    if (feature.properties) {
-                        // "name" や "ID" など、シェープファイルの属性名に合わせて書き換えてください
-                        const fieldName = feature.properties.name || "耕地の種類"; 
-                        layer.bindPopup("場所: " + fieldName);
-                    }
-                }
-            }).addTo(map);
-        } catch (e) {
-            console.error("田畑データの読み込み失敗:", e);
-        }
-    }
-    
-    // 地図初期化の後に実行
-    loadFields();
-    // --- 地図初期化（既存のコード内）の後に実行 ---
-    // map = L.map('map')... の下あたりに追加
-    loadPastMarkers();
 </script>
-
 </body>
 </html>
-
