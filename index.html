@@ -232,6 +232,37 @@
         }
     }
     
+    // --- 田畑のデータを読み込んで表示する関数 ---
+    async function loadFields() {
+        try {
+            const response = await fetch('fields.geojson'); // アップロードしたファイル名
+            const geojsonData = await response.json();
+    
+            L.geoJSON(geojsonData, {
+                style: function(feature) {
+                    return {
+                        color: "#28a745", // 枠線の色（緑）
+                        weight: 2,        // 線の太さ
+                        fillColor: "#28a745", // 塗りつぶしの色
+                        fillOpacity: 0.2  // 透明度（薄くする）
+                    };
+                },
+                onEachFeature: function(feature, layer) {
+                    // もし属性データ（田畑名など）があればポップアップで表示
+                    if (feature.properties) {
+                        // "name" や "ID" など、シェープファイルの属性名に合わせて書き換えてください
+                        const fieldName = feature.properties.name || "耕地の種類"; 
+                        layer.bindPopup("場所: " + fieldName);
+                    }
+                }
+            }).addTo(map);
+        } catch (e) {
+            console.error("田畑データの読み込み失敗:", e);
+        }
+    }
+    
+    // 地図初期化の後に実行
+    loadFields();
     // --- 地図初期化（既存のコード内）の後に実行 ---
     // map = L.map('map')... の下あたりに追加
     loadPastMarkers();
@@ -239,3 +270,4 @@
 
 </body>
 </html>
+
