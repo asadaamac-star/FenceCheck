@@ -115,8 +115,8 @@
             document.getElementById('voltage').value = "";
             document.getElementById('memo').value = "";
             // 送信後にルートをリセットしたい場合は以下を有効化
-            // pathHistory = [];
-            // pathLine.setLatLngs([]);
+            pathHistory = [];
+            pathLine.setLatLngs([]);
         } catch (e) {
             alert("エラーが発生しました: " + e.message);
         } finally {
@@ -128,3 +128,4 @@
 
 </body>
 </html>
+
