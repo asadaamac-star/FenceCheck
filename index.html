@@ -3,18 +3,18 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
-    <title>電気柵点検アプリ</title>
+    <title>電気柵点検アプリ（ルート保存版）</title>
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
     <style>
         body { margin: 0; padding: 0; font-family: sans-serif; }
-        #map { height: 60vh; width: 100%; }
-        .controls { padding: 15px; background: #f8f9fa; height: 40vh; box-sizing: border-box; overflow-y: auto; }
+        #map { height: 50vh; width: 100%; }
+        .controls { padding: 15px; background: #f8f9fa; height: 50vh; box-sizing: border-box; overflow-y: auto; }
         .input-group { margin-bottom: 10px; }
-        label { display: block; font-weight: bold; margin-bottom: 5px; }
-        input, textarea { width: 100%; padding: 10px; border: 1px solid #ccc; border-radius: 4px; box-sizing: border-box; font-size: 16px; }
-        button { width: 100%; padding: 12px; background-color: #007bff; color: white; border: none; border-radius: 4px; font-size: 18px; cursor: pointer; margin-top: 10px; }
+        label { display: block; font-weight: bold; margin-bottom: 5px; font-size: 14px; }
+        input, textarea { width: 100%; padding: 12px; border: 1px solid #ccc; border-radius: 4px; box-sizing: border-box; font-size: 16px; }
+        button { width: 100%; padding: 15px; background-color: #28a745; color: white; border: none; border-radius: 4px; font-size: 18px; font-weight: bold; cursor: pointer; margin-top: 10px; }
         button:disabled { background-color: #ccc; }
-        #status { font-size: 12px; color: #666; margin-top: 5px; text-align: center; }
+        #status { font-size: 12px; color: #666; margin-top: 10px; text-align: center; }
     </style>
 </head>
 <body>
@@ -30,51 +30,43 @@
         <label>メモ</label>
         <textarea id="memo" rows="2" placeholder="異常なし、草刈り必要など"></textarea>
     </div>
-    <button id="sendBtn">データを送信</button>
+    <button id="sendBtn">点検データを送信</button>
     <div id="status">位置情報を取得中...</div>
 </div>
 
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 
 <script>
-    // --- 設定 ---
     const GAS_URL = "https://script.google.com/macros/s/AKfycbwxOufY73Gwh7cx6mrtR4iDwE1K7pOxw7CTh8i68OWlB0WYHnm7WqlJJCX6TJFmLoIh4w/exec";
     
     let map, marker, pathLine;
     let currentPos = { lat: 0, lng: 0 };
-    let pathHistory = []; // ルート追跡用
+    let pathHistory = []; 
 
-    // 地図の初期化（最初は印西市役所を表示、後で現在地に飛ぶ）
-    map = L.map('map').setView([35.8325, 140.1458], 15);
+    map = L.map('map').setView([35.6812, 139.7671], 15);
     L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
         attribution: '© OpenStreetMap'
     }).addTo(map);
 
-    // ルートを描画するための線
-    pathLine = L.polyline([], {color: 'blue', weight: 5}).addTo(map);
+    pathLine = L.polyline([], {color: '#007bff', weight: 6, opacity: 0.7}).addTo(map);
 
-    // GPS情報の取得
     if (navigator.geolocation) {
         navigator.geolocation.watchPosition(
             (pos) => {
                 const { latitude, longitude, accuracy } = pos.coords;
                 currentPos = { lat: latitude, lng: longitude };
                 
-                // マーカー更新
                 if (!marker) {
-                    marker = L.circleMarker([latitude, longitude], {radius: 8, color: 'red', fillOpacity: 1}).addTo(map);
+                    marker = L.circleMarker([latitude, longitude], {radius: 8, color: 'red', fillColor: 'red', fillOpacity: 1}).addTo(map);
+                    map.panTo([latitude, longitude]);
                 } else {
                     marker.setLatLng([latitude, longitude]);
                 }
                 
-                // 履歴に追加して線を引く
                 pathHistory.push([latitude, longitude]);
                 pathLine.setLatLngs(pathHistory);
                 
-                // 地図を自分を中心に（初回のみ、または必要に応じて）
-                map.panTo([latitude, longitude]);
-                
-                document.getElementById('status').innerText = `位置取得中 (精度: ±${Math.round(accuracy)}m)`;
+                document.getElementById('status').innerText = `精度: ±${Math.round(accuracy)}m / 記録点数: ${pathHistory.length}`;
             },
             (err) => {
                 document.getElementById('status').innerText = "GPSエラー: " + err.message;
@@ -83,15 +75,11 @@
         );
     }
 
-    // 送信ボタンの処理
     document.getElementById('sendBtn').addEventListener('click', async () => {
         const voltage = document.getElementById('voltage').value;
         const memo = document.getElementById('memo').value;
         const btn = document.getElementById('sendBtn');
         const status = document.getElementById('status');
-        
-        // pathHistory（配列）を、WKT形式の文字列に変換する
-        const wktPath = "LINESTRING(" + pathHistory.map(p => `${p[1]} ${p[0]}`).join(", ") + ")";
 
         if (!voltage) {
             alert("電圧を入力してください");
@@ -100,6 +88,12 @@
 
         btn.disabled = true;
         status.innerText = "送信中...";
+
+        // WKT形式 (LINESTRING(lng lat, lng lat, ...)) に変換
+        // GISソフト(QGIS等)でそのまま認識できる形式です
+        const wktPath = pathHistory.length > 1 
+            ? "LINESTRING(" + pathHistory.map(p => `${p[1]} ${p[0]}`).join(", ") + ")" 
+            : "";
 
         const data = {
             lat: currentPos.lat,
@@ -110,7 +104,6 @@
         };
 
         try {
-            // GASにデータを送信 (CORS対策のため no-cors モード)
             await fetch(GAS_URL, {
                 method: "POST",
                 mode: "no-cors",
@@ -118,9 +111,12 @@
                 body: JSON.stringify(data)
             });
 
-            alert("保存しました！");
+            alert("保存しました！ルートも記録されました。");
             document.getElementById('voltage').value = "";
             document.getElementById('memo').value = "";
+            // 送信後にルートをリセットしたい場合は以下を有効化
+            // pathHistory = [];
+            // pathLine.setLatLngs([]);
         } catch (e) {
             alert("エラーが発生しました: " + e.message);
         } finally {
@@ -131,6 +127,4 @@
 </script>
 
 </body>
-
 </html>
-
