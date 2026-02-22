@@ -82,9 +82,9 @@
     const legend = L.control({position: 'bottomright'});
     legend.onAdd = function () {
         const div = L.DomUtil.create('div', 'legend');
-        div.innerHTML += '<i style="background: rgba(0, 123, 255, 0.2); border: 2px solid #007bff"></i> 田 (水色)<br>';
-        div.innerHTML += '<i style="background: rgba(139, 69, 19, 0.2); border: 2px solid #8b4513"></i> 畑 (茶色)<br>';
-        div.innerHTML += '<i class="line dashed"></i> 集落境界 (ピンク点線)';
+        div.innerHTML += '<i style="background: rgba(0, 123, 255, 0.2); border: 2px solid #007bff"></i> 田<br>';
+        div.innerHTML += '<i style="background: rgba(139, 69, 19, 0.2); border: 2px solid #8b4513"></i> 畑<br>';
+        div.innerHTML += '<i class="line dashed"></i> 集落境界';
         return div;
     };
     legend.addTo(map);
@@ -123,9 +123,9 @@
     // 集落境界
     async function loadVillageBoundary() {
         try {
-            const res = await fetch('village_boundary.geojson');
-            const data = await res.json();
-            L.geoJSON(data, {
+            const res2 = await fetch('village_boundary.geojson');
+            const data2 = await res2.json();
+            L.geoJSON(data2, {
                 style: { 
                     color: "#ff33ff",   // ピンク
                     weight: 3, 
@@ -231,3 +231,4 @@
 </script>
 </body>
 </html>
+
