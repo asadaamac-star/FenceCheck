@@ -11,14 +11,12 @@
         .controls { padding: 15px; height: 55vh; box-sizing: border-box; overflow-y: auto; }
         
         .btn-flex { display: flex; gap: 10px; margin-bottom: 12px; }
-        button { flex: 1; padding: 14px; border: none; border-radius: 8px; font-size: 16px; font-weight: bold; cursor: pointer; color: white; transition: 0.2s; box-shadow: 0 2px 4px rgba(0,0,0,0.1); }
+        button { flex: 1; padding: 14px; border: none; border-radius: 8px; font-size: 16px; font-weight: bold; cursor: pointer; color: white; transition: 0.2; box-shadow: 0 2px 4px rgba(0,0,0,0.1); }
         
         #recordBtn { background-color: #007bff; }
         #recordBtn.recording { background-color: #dc3545; animation: pulse 2s infinite; }
         #sendBtn { background-color: #28a745; width: 100%; margin-top: 10px; }
-        button:active { transform: translateY(1px); box-shadow: none; }
-        button:disabled { background-color: #ccc !important; }
-
+        
         @keyframes pulse { 0% { opacity: 1; } 50% { opacity: 0.7; } 100% { opacity: 1; } }
 
         .input-group { margin-bottom: 12px; }
@@ -29,9 +27,11 @@
         .val { color: #dc3545; font-weight: bold; font-size: 16px; }
         #gps-status { font-size: 11px; color: #888; text-align: center; margin-top: 8px; }
         
-        /* 凡例のスタイル */
-        .legend { background: white; padding: 6px 10px; line-height: 18px; color: #555; border-radius: 5px; box-shadow: 0 0 15px rgba(0,0,0,0.2); font-size: 12px; }
-        .legend i { width: 14px; height: 14px; float: left; margin-right: 8px; opacity: 0.7; border: 1px solid #999; }
+        /* 凡例のスタイル修正 */
+        .legend { background: white; padding: 10px; line-height: 24px; color: #333; border-radius: 5px; box-shadow: 0 0 15px rgba(0,0,0,0.2); font-size: 13px; }
+        .legend i { width: 18px; height: 18px; float: left; margin-right: 10px; opacity: 0.7; }
+        .legend .line { background: none; border-top: 3px solid; height: 0; margin-top: 8px; }
+        .legend .dashed { border-top: 3px dashed #ff33ff; }
     </style>
 </head>
 <body>
@@ -42,19 +42,15 @@
     <div class="btn-flex">
         <button id="recordBtn">👣 ルート記録開始</button>
     </div>
-
     <div class="input-group">
         <label>⚡ 電圧 (V)</label>
         <input type="number" id="voltage" placeholder="例: 8500" inputmode="numeric">
     </div>
-    
     <div class="input-group">
         <label>📝 点検メモ</label>
-        <textarea id="memo" rows="2" placeholder="草刈り済、碍子交換など"></textarea>
+        <textarea id="memo" rows="2" placeholder="草刈り済など"></textarea>
     </div>
-    
     <button id="sendBtn">✅ データを送信してリセット</button>
-    
     <div class="stats-box">
         <div>記録: <span id="count" class="val">0</span> 点</div>
         <div>距離: <span id="dist" class="val">0</span> m</div>
@@ -66,8 +62,6 @@
 
 <script>
     const GAS_URL = "https://script.google.com/macros/s/AKfycbwxOufY73Gwh7cx6mrtR4iDwE1K7pOxw7CTh8i68OWlB0WYHnm7WqlJJCX6TJFmLoIh4w/exec";
-    const MIN_DISTANCE = 1.0; 
-    const PRECISION = 6;      
     
     let map, marker, pathLine;
     let currentPos = { lat: 0, lng: 0 };
@@ -75,7 +69,7 @@
     let totalDistance = 0;
     let isRecording = false;
 
-    // --- 1. 地図初期化 (国土地理院) ---
+    // --- 1. 地図初期化 ---
     const stdMap = L.tileLayer('https://cyberjapandata.gsi.go.jp/xyz/std/{z}/{x}/{y}.png', { attribution: "地理院標準" });
     const ortMap = L.tileLayer('https://cyberjapandata.gsi.go.jp/xyz/ort/{z}/{x}/{y}.jpg', { attribution: "地理院写真" });
 
@@ -84,20 +78,20 @@
 
     pathLine = L.polyline([], {color: '#dc3545', weight: 5, opacity: 0.8}).addTo(map);
 
-    // --- 2. 凡例の追加 ---
+    // --- 2. 凡例の修正（スタイルと一致） ---
     const legend = L.control({position: 'bottomright'});
     legend.onAdd = function () {
         const div = L.DomUtil.create('div', 'legend');
-        div.innerHTML += '<i style="background: #007bff"></i> 田<br>';
-        div.innerHTML += '<i style="background: #a52a2a"></i> 畑<br>';
-        div.innerHTML += '<i style="border: 1px dashed #ff33ff; background: none"></i> 集落境界';
+        div.innerHTML += '<i style="background: rgba(0, 123, 255, 0.2); border: 2px solid #007bff"></i> 田 (水色)<br>';
+        div.innerHTML += '<i style="background: rgba(139, 69, 19, 0.2); border: 2px solid #8b4513"></i> 畑 (茶色)<br>';
+        div.innerHTML += '<i class="line dashed"></i> 集落境界 (ピンク点線)';
         return div;
     };
     legend.addTo(map);
 
-    // --- 3. GeoJSON読み込み処理 ---
+    // --- 3. GeoJSONスタイル設定 ---
 
-    // 田畑データ (agri_fields.geojson)
+    // 田畑データ
     async function loadAgriFields() {
         try {
             const res = await fetch('agri_fields.geojson');
@@ -106,32 +100,44 @@
                 style: function(feature) {
                     const type = feature.properties["耕地の種類"];
                     if (type === "田") {
-                        return { color: "#007bff", weight: 2, fillOpacity: 0.3, fillColor: "#007bff" };
+                        return { 
+                            color: "#007bff",      // 青線
+                            fillColor: "#007bff",  // 水色塗りつぶし
+                            fillOpacity: 0.2,      // 透明度
+                            weight: 2 
+                        };
                     } else if (type === "畑") {
-                        return { color: "#a52a2a", weight: 2, fillOpacity: 0.3, fillColor: "#a52a2a" };
-                    } else {
-                        return { color: "#28a745", weight: 2, fillOpacity: 0.2, fillColor: "#28a745" };
+                        return { 
+                            color: "#8b4513",      // 茶色線
+                            fillColor: "#8b4513",  // 茶色塗りつぶし
+                            fillOpacity: 0.2,      // 透明度
+                            weight: 2 
+                        };
                     }
-                },
-                onEachFeature: function(feature, layer) {
-                    layer.bindPopup("種類: " + (feature.properties["耕地の種類"] || "不明"));
+                    return { color: "#28a745", weight: 1, fillOpacity: 0.1 };
                 }
             }).addTo(map);
-        } catch (e) { console.log("田畑データ読込エラー", e); }
+        } catch (e) { console.log("田畑データ読込エラー"); }
     }
 
-    // 集落境界 (village_boundary.geojson)
+    // 集落境界
     async function loadVillageBoundary() {
         try {
             const res = await fetch('village_boundary.geojson');
             const data = await res.json();
             L.geoJSON(data, {
-                style: { color: "#ff33ff", weight: 3, dashArray: '5, 10', fill: false },
+                style: { 
+                    color: "#ff33ff",   // ピンク
+                    weight: 3, 
+                    dashArray: '5, 10', // 点線
+                    fill: false         // 塗りつぶしなし
+                },
                 interactive: false
             }).addTo(map);
-        } catch (e) { console.log("集落境界読込エラー", e); }
+        } catch (e) { console.log("集落境界読込エラー"); }
     }
 
+    // 過去データ読み込み
     async function loadPastMarkers() {
         try {
             const res = await fetch(GAS_URL);
@@ -147,7 +153,7 @@
     loadVillageBoundary();
     loadPastMarkers();
 
-    // --- 4. GPSロジック ---
+    // --- 4. GPS & ボタン処理 (前回同様) ---
 
     function getDistance(lat1, lon1, lat2, lon2) {
         const R = 6371000;
@@ -159,8 +165,8 @@
 
     if (navigator.geolocation) {
         navigator.geolocation.watchPosition((pos) => {
-            const lat = parseFloat(pos.coords.latitude.toFixed(PRECISION));
-            const lng = parseFloat(pos.coords.longitude.toFixed(PRECISION));
+            const lat = parseFloat(pos.coords.latitude.toFixed(6));
+            const lng = parseFloat(pos.coords.longitude.toFixed(6));
             currentPos = { lat, lng };
 
             if (!marker) {
@@ -173,7 +179,7 @@
                 else {
                     const last = pathHistory[pathHistory.length - 1];
                     const d = getDistance(last[0], last[1], lat, lng);
-                    if (d >= MIN_DISTANCE) {
+                    if (d >= 1.0) {
                         totalDistance += d;
                         pathHistory.push([lat, lng]);
                         pathLine.setLatLngs(pathHistory);
@@ -185,8 +191,6 @@
             document.getElementById('dist').innerText = Math.round(totalDistance);
         }, null, { enableHighAccuracy: true });
     }
-
-    // --- 5. 操作ボタン ---
 
     const recordBtn = document.getElementById('recordBtn');
     recordBtn.addEventListener('click', () => {
